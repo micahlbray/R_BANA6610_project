@@ -1,0 +1,374 @@
+library(readxl)
+library(ggplot2)
+library(dplyr)
+library(plyr)
+library(corrplot)
+require(scales)
+library(caret)
+library(leaps)
+library(psych)
+library(car)
+library(MASS)
+#library(olsrr)
+#install.packages("devtools")
+#devtools::install_github("rsquaredacademy/olsrr")
+
+ski = read_xlsx("ski.xlsx")
+
+# add composite columns
+ski$TotalBRooms = ski$Bedrooms + ski$Bathrooms
+ski$FtPerLot = ski$Sq_Ft / ski$`Lot size`
+
+#############################################################################
+## Quick Summary
+#############################################################################
+dim(ski)
+colnames(ski)
+str(ski)
+summary(ski)
+psych::describe(ski)
+
+#############################################################################
+## Explore data through plots
+#############################################################################
+## Line Plots
+ggplot() +
+  geom_line(aes(x=ski$`Selling price`, y=ski$TotalBRooms),
+            data=ski, 
+            stat="identity")
+
+ggplot() +
+  geom_line(aes(x=ski$`Age`, y=ski$`Selling price`),
+            data=ski, 
+            stat="identity")
+
+# This look like the correlation insinuated. Bad
+ggplot() +
+  geom_line(aes(x=ski$`Lot size`, y=ski$`Selling price`),
+            data=ski, 
+            stat="identity")
+
+ggplot() +
+  geom_line(aes(x=ski$Sq_Ft, y=ski$`Selling price`),
+            data=ski, 
+            stat="identity")
+
+ggplot() +
+  geom_line(aes(x=ski$Sq_Ft, y=ski$`Selling price`, colour=ski$Garage),
+            data=ski, 
+            stat="identity")
+
+ggplot() +
+  geom_line(aes(x=ski$Sq_Ft, y=ski$`Selling price`, colour=ski$TotalBRooms),
+            data=ski, 
+            stat="identity")
+
+#############################################################################
+## Boxplots
+ski$Bedrooms = factor(ski$Bedrooms); levels(ski$Bedrooms)
+ski$Garage = factor(ski$Garage); levels(ski$Garage)
+ski$`Lot size` = factor(ski$`Lot size`); levels(ski$`Lot size`)
+
+ggplot(data=ski, aes(y=ski$`Selling price`)) +
+  geom_boxplot()
+
+ggplot(data=ski, aes(y=ski$`Selling price`, group=ski$`Selling price`)) +
+  geom_boxplot()
+
+ggplot(data=ski, aes(x=ski$Garage, y=ski$`Selling price`)) +
+  geom_boxplot()
+
+ggplot(data=ski, aes(x=ski$`Lot size`, y=ski$`Selling price`)) +
+  geom_boxplot()
+
+# unfactor the fields
+ski$Bedrooms = as.numeric(levels(ski$Bedrooms))[ski$Bedrooms]; levels(ski$Bedrooms)
+ski$Garage = as.numeric(levels(ski$Garage))[ski$Garage]; levels(ski$Garage)
+ski$`Lot size` = as.numeric(levels(ski$`Lot size`))[ski$`Lot size`]; levels(ski$`Lot size`)
+
+
+#############################################################################
+## Explore Outliers and Finalize Data
+#############################################################################
+#############################################################################
+# boxplots to find outliers
+boxplot(ski)
+boxplot(ski$Age, main='Age Box Plot', ylab='Age') # some outliers
+boxplot(ski$Garage) # one marginal outlier
+boxplot(ski$Mountain) # one larger outlier
+boxplot(ski$`On market`) # some outliers
+boxplot(ski$`Lot size`, main='Lot Size Box Plot', ylab='Lot Size') # major outliers
+boxplot(ski$`Sq_Ft`) # major outliers
+
+# outliers to solve for and remove outliers
+# Lot size
+outs.lotsize = sort(boxplot(ski$`Lot size`, plot=FALSE)$out, decreasing = TRUE); outs.lotsize
+outs.lotsize = outs.lotsize[0:3] # remove top 3 outliers
+# Age
+outs.age = sort(boxplot(ski$`Age`, plot=FALSE)$out, decreasing = TRUE); outs.age
+outs.age = outs.age[0:3] # remove top 2 outliers
+#Garage
+#outs.garage = sort(boxplot(ski$`Garage`, plot=FALSE)$out, decreasing = TRUE); outs.garage
+#outs.garage = outs.garage[0:2] # remove top 2 outliers
+
+#Remove from data
+ski = ski[-which(ski$`Lot size` %in% outs.lotsize),]
+#ski = ski[-which(ski$`Age` %in% outs.age),]
+#ski = ski[-which(ski$`Mountain` %in% outs.mountain),]
+
+#outs.mountain = sort(boxplot(ski$`Mountain`, plot=FALSE)$out, decreasing = TRUE); outs.mountain
+#outs.mountain = outs.mountain[0:2] # remove top 2 outliers
+#ski = ski[-which(ski$`Mountain` %in% outs.mountain),]
+
+#outs.ft = sort(boxplot(ski$`Sq_Ft`, plot=FALSE)$out, decreasing = TRUE); outs.ft
+#outs.ft = outs.ft[0:2] # remove top 2 outliers
+#ski = ski[-which(ski$`Sq_Ft` %in% outs.ft),]
+
+
+#############################################################################
+## Check Normalcy of SalesPrice
+#############################################################################
+qqnorm(ski$`Selling price`)
+qqline(ski$`Selling price`, col = 2)
+
+psych::describe(ski$`Selling price`)
+psych::describeBy(ski, ski$`Selling price`)
+
+# mode
+ggplot(data=ski, aes(x=ski$`Selling price`)) +
+  geom_bar(stat="count")
+ggplot(data=ski, aes(x=ski$`Selling price`)) +
+  geom_line(stat="count")
+
+# Histogram by Count
+qplot(ski$`Selling price`,
+      geom="histogram",
+      #breaks=seq(315, 545, by = n),
+      bins=15,
+      main = "Histogram for Sale Price", 
+      xlab = "Sale Price",
+      ylab = 'Count',
+      fill=I("black"), 
+      col=I("gray")) +
+  scale_x_continuous(labels = dollar) +
+  theme(panel.background = element_rect(fill = '#ffffff'),
+        plot.title=element_text(size=16, hjust = 0.3),
+        axis.title.y=element_text(size = 12, vjust = 0.2,
+                                  margin = margin(t = 0, r = 20, b = 1, l = 0)),
+        axis.title.x=element_text(size = 12, vjust = 0.2,
+                                  margin = margin(t = 10, r = 0, b = 10, l = 5)),
+        axis.text.y=element_text(size = 10),
+        axis.text.x=element_text(size = 10),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank())
+
+# Graph by density
+ggplot(data=ski, aes(ski$`Selling price`)) + 
+  geom_histogram(aes(y =..density..),
+                 #breaks=seq(34000, 755000, by = n),
+                 bins=15,
+                 col="gray", 
+                 fill="black", 
+                 alpha = .8) +
+  geom_density(fill = "#ff4d4d", alpha = 0.5) + 
+  ggtitle("Density Histogram with Overlay") +
+  labs(x="Sale Price", y="Density") +
+  scale_x_continuous(labels = dollar) +
+  scale_y_continuous(labels = format_format(big.mark = " ", decimal.mark = ".", scientific = FALSE)) + 
+  theme(panel.background = element_rect(fill = '#ffffff'),
+        plot.title=element_text(size=16, hjust = 0.3),
+        axis.title.y=element_text(size = 12, vjust = 0.2,
+                                  margin = margin(t = 0, r = 20, b = 1, l = 0)),
+        axis.title.x=element_text(size = 12, vjust = 0.2,
+                                  margin = margin(t = 10, r = 0, b = 10, l = 5)),
+        axis.text.y=element_text(size = 10),
+        axis.text.x=element_text(size = 10),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank())
+summary(ski$`Selling price`)
+summary(ski.log$`Selling price`)
+
+#############################################################################
+##### Log Transformation
+ski.log = log(ski) # log transformation to see if this affects the variable relationships
+##### The log transformation doesn't have much affect on the normalcy of the variable
+# Graph by count
+qplot(ski.log$`Selling price`,
+      geom="histogram",
+      #breaks=seq(315, 545, by = n),
+      bins=15,
+      main = "Histogram for Sale Price", 
+      xlab = "Sale Price",
+      ylab = 'Count',
+      fill=I("black"), 
+      col=I("gray")) +
+  scale_x_continuous(labels = dollar) +
+  theme(panel.background = element_rect(fill = '#ffffff'),
+        plot.title=element_text(size=16, hjust = 0.3),
+        axis.title.y=element_text(size = 12, vjust = 0.2,
+                                  margin = margin(t = 0, r = 20, b = 1, l = 0)),
+        axis.title.x=element_text(size = 12, vjust = 0.2,
+                                  margin = margin(t = 10, r = 0, b = 10, l = 5)),
+        axis.text.y=element_text(size = 10),
+        axis.text.x=element_text(size = 10),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank())
+
+#############################################################################
+## Correlation - Numerical
+#############################################################################
+
+# This will show what variables correlate with Selling price 
+# and what could potentially be colinear if the variables correlate strongly
+ski.num = Filter(is.numeric, ski)
+ski.num.cor = cor(ski.num)
+# Visualize Correlation Matrix in Heatmap
+corrplot(ski.num.cor, method = "color", diag = FALSE) # Display the correlation coefficient
+# Visualize Correlation Matrix
+p.mat = cor.mtest(ski.num)$p
+res = cor.mtest(ski.num, conf.level = .95)
+col = colorRampPalette(c("#BB4444", "#EE9988", "#FFFFFF", "#77AADD", "#4477AA"))
+corrplot(ski.num.cor, method = "color", col = col(200),
+         type = "upper", number.cex = 0.45, tl.cex = 0.6, #order = "AOE", 
+         addCoef.col = "black", # Add coefficient of correlation
+         tl.col = "black", tl.srt = 90, # Text label color and rotation
+         p.mat = p.mat, sig.level = 0.01, insig = "blank",
+         diag = FALSE)
+
+
+##### Scatterplot Matrix
+# DataFrame of just correlation with Selling price
+cols = names(ski.num) %in% c("Selling price","rty #") 
+ski.num.notSalePrice <- ski.num[!cols]
+df.corr.SalesPrice = sort(data.frame(cor(ski.num$`Selling price`, 
+                                         ski.num.notSalePrice)), decreasing = TRUE)
+cols = colnames(df.corr.SalesPrice)[0:113]
+cols = mapvalues(cols, 
+                 c("List.price","On.market","Lot.size"), 
+                 c("List price","On market","Lot size"),
+                 warn_missing = TRUE)
+ski.num.sctr = ski.num[cols]
+plot(ski.num.sctr)
+
+# Scatter Plot GrLivArea and Sale Price
+ggplot(ski, aes(x=ski$Bedrooms, y=ski$`Selling price`)) +
+  geom_point(shape=1) +     # Use hollow circles
+  geom_smooth(method=lm) +  # Add linear regression line (by default includes 95% confidence region)
+  ggtitle("Bedrooms and Sale Price ($)") +
+  labs(x="Bedrooms", y="Sale Price ($)") +
+  scale_x_continuous(labels = comma) +
+  scale_y_continuous(labels = dollar) + 
+  theme(panel.background = element_rect(fill = '#ffffff'),
+        plot.title=element_text(size=16, hjust = 0.5),
+        axis.title.y=element_text(size = 12, vjust = 0.2,
+                                  margin = margin(t = 0, r = 20, b = 1, l = 0)),
+        axis.title.x=element_text(size = 12, vjust = 0.2,
+                                  margin = margin(t = 10, r = 0, b = 10, l = 5)),
+        axis.text.y=element_text(size = 10),
+        axis.text.x=element_text(size = 10),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank())
+
+# Scatter Plot YearBuilt and Selling price
+ggplot(ski, aes(x=ski$Sq_Ft, y=ski$`Selling price`)) +
+  geom_point(shape=1) +     # Use hollow circles
+  geom_smooth(method=lm) +  # Add linear regression line (by default includes 95% confidence region)
+  ggtitle("Square Feet and Sale Price ($)") +
+  labs(x="Square Feet", y="Sale Price") +
+  #scale_x_continuous(labels = comma) +
+  scale_y_continuous(labels = dollar) + 
+  theme(panel.background = element_rect(fill = '#ffffff'),
+        plot.title=element_text(size=16, hjust = 0.5),
+        axis.title.y=element_text(size = 12, vjust = 0.2,
+                                  margin = margin(t = 0, r = 20, b = 1, l = 0)),
+        axis.title.x=element_text(size = 12, vjust = 0.2,
+                                  margin = margin(t = 10, r = 0, b = 10, l = 5)),
+        axis.text.y=element_text(size = 10),
+        axis.text.x=element_text(size = 10),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank())
+
+#############################################################################
+## Exploring MODELs
+#############################################################################
+model = lm(ski$`Selling price` ~ ., data=ski)
+summary(model)
+models = regsubsets(ski$`Selling price` ~ ., ski, nvmax=6)
+summary(models)
+res.sum <- summary(models)
+
+stepAIC(model, direction="both")
+
+vcov(models) # covariance matrix for model parameters 
+influence(models) # regression diagnostics
+
+# summary of data set
+dim(ski) #33 rows with "Age" outlier cured for and 36 with "Lot size" outliers cured for (out of 39)
+colnames(ski)
+str(ski)
+summary(ski)
+
+model = lm(`Selling price` ~ Garage+Bathrooms+Sq_Ft, data = ski)
+#0.5393 w/ou outlier removal
+#0.6987 remove outliers for Lot Size
+#0.7021 remove outliers for Lot Size and Age
+#0.7401 remove outliers for Lot Size and Age and Garage
+model = lm(`Selling price` ~ Mountain+Garage+Bathrooms+Sq_Ft, data = ski)
+#0.6325 w/ou outlier removal
+#0.801 remove outliers for Lot Size
+#0.8004 remove outliers for Lot Size and Age
+#0.7948 remove outliers for Lot Size and Age and Garage
+model = lm(`Selling price` ~ Mountain+Garage+TotalBRooms+Sq_Ft+Age, data = ski) 
+#0.6627 w/ou outlier removal
+#0.8354 remove outliers for Lot Size
+#0.846 remove outliers for Lot Size and Age
+#0.845 remove outliers for Lot Size and Age and Garage
+model = lm(`Selling price` ~ Mountain+Garage+TotalBRooms, data = ski) 
+# the model performed a good bit better when not pulling out outliers for "Mountain"
+# and "Sq_Ft". Additonally, adding in things like "Age" or "On Market" decreased model performance.
+#0.6604 w/ou outlier removal
+#0.8094 remove outliers for Lot Size
+#0.8178 remove outliers for Lot Size and Age
+#0.809 remove outliers for Lot Size and Age and Garage
+
+#############################################################################
+## MODEL
+#############################################################################
+model = lm(`Selling price` ~ Mountain+Garage+TotalBRooms+Sq_Ft, data = ski) 
+# the model performed a good bit better when not pulling out outliers for "Mountain"
+# and "Sq_Ft". Additonally, adding in things like "Age" or "On Market" decreased model performance.
+#0.6714 w/ou outlier removal
+#0.8399 remove outliers for Lot Size
+#0.843 remove outliers for Lot Size and Age
+#0.8423 remove outliers for Lot Size and Age and Garage
+
+# It should be noted that removing Age from the model didn't really affect performance, but it
+# would cost 1 degree of freedom to utilize. Age had a low p-value and would probably
+# affect the model more poorly on a larger scale.
+
+#############################################################################
+# Give summary of the model
+summary(model)
+anova(model)
+model$coefficients
+
+ols_step_best_subset(model)
+
+
+#############################################################################
+## Validate the Model assumptions
+# Residual plot
+plot(ski$`Selling price`, model$residuals, xlab = 'Selling Price', ylab='Residuals', main =
+       'Residual Plot')
+abline(h=0, col = 'red')
+# Plot of Actual vs Predicted
+plot(predict(model),ski$`Selling price`,
+     xlab="predicted",ylab="actual")
+abline(a=0,b=1)
+# Normal probability plot of residuals
+qqnorm(model$residuals)
+qqline(model$residuals, col = 2) #fails because it is not a straight line
+# Durbin Watson test
+durbinWatsonTest(model)
+# Colinearity
+vif(model)

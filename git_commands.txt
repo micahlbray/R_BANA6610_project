@@ -1,0 +1,8 @@
+cd C:/Users/mbray/Dropbox/Grad\ School/CU\ Denver/BANA_6610/project
+git init
+
+git add -A
+git commit -m "Your message here."
+
+git remote add origin https://github.com/micahlbray/R_BANA6610_project
+git push -u origin master
