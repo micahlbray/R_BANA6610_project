@@ -1,11 +1,21 @@
-library(readxl)
-library(ggplot2)
-library(GGally)
-library(dplyr)
+library(tidyverse)
+#library(readxl)
+#library(ggplot2)
+#library(GGally)
+#library(dplyr)
 library(corrplot)
 require(scales)
-library(psych)
+library(psych) # summarize data set
+library(fastDummies) # dummy variables
+library(DAAG) # k-folds
+library(MASS) # stepAIC
+library(leaps) # subsets regression
+library(car) # plot subsets
+library(bestglm) # subsets regression
+library(rsq) # create r square estimate for glm
+library(caret) # k-folds cross-validation
 
+# Read in data
 train = read.csv("train.csv"); train
 
 #############################################################################
@@ -14,7 +24,14 @@ train = read.csv("train.csv"); train
 dim(train) #1460 rows and 81 cols
 colnames(train)
 str(train)
-psych::describe(train) #summary of normality by variable
+# Summary of normality by variable
+psych::describe(train)
+# missing a lot of data from:
+# Alley (91 records present)
+# FireplaceQu (770 records present)
+# PoolQC (7 records present)
+# Fence (281 records present)
+# MiscFeature (54 records present)
 
 #############################################################################
 ## Histograms of SalesPrice
@@ -45,11 +62,11 @@ qplot(train$SalePrice,
         panel.grid.minor = element_blank())
 
 #############################################################################
-## Explore Outliers and Categoricals
+## Exploration - Outliers
 #############################################################################
 #############################################################################
-# boxplots to find outliers
-boxplot(train)
+# boxplots to find outliers and the variable selection was based on skew > 5
+# from psych::describe() command above
 boxplot(train$LotArea, main='LotArea Plot', ylab='LotArea')
 ggplot(data=train, aes(x=train$Street, y=train$SalePrice)) +
   scale_y_continuous(labels = dollar) +
@@ -74,46 +91,33 @@ boxplot(train$X3SsnPorch, main='X3SsnPorch Box Plot', ylab='X3SsnPorch')
 boxplot(train$PoolArea, main='PoolArea Box Plot', ylab='PoolArea')
 boxplot(train$MiscVal, main='MiscVal Box Plot', ylab='MiscVal')
 
-
-# outliers to solve for and remove outliers
-# Lot size
-outs.lotsize = sort(boxplot(ski$`Lot size`, plot=FALSE)$out, decreasing = TRUE); outs.lotsize
-outs.lotsize = outs.lotsize[0:3] # remove top 3 outliers
-# Age
-outs.age = sort(boxplot(ski$`Age`, plot=FALSE)$out, decreasing = TRUE); outs.age
-outs.age = outs.age[0:3] # remove top 2 outliers
-#Garage
-#outs.garage = sort(boxplot(ski$`Garage`, plot=FALSE)$out, decreasing = TRUE); outs.garage
-#outs.garage = outs.garage[0:2] # remove top 2 outliers
-
-#Remove from data
-ski = ski[-which(ski$`Lot size` %in% outs.lotsize),]
-#ski = ski[-which(ski$`Age` %in% outs.age),]
-#ski = ski[-which(ski$`Mountain` %in% outs.mountain),]
-
-#outs.mountain = sort(boxplot(ski$`Mountain`, plot=FALSE)$out, decreasing = TRUE); outs.mountain
-#outs.mountain = outs.mountain[0:2] # remove top 2 outliers
-#ski = ski[-which(ski$`Mountain` %in% outs.mountain),]
-
-#outs.ft = sort(boxplot(ski$`Sq_Ft`, plot=FALSE)$out, decreasing = TRUE); outs.ft
-#outs.ft = outs.ft[0:2] # remove top 2 outliers
-#ski = ski[-which(ski$`Sq_Ft` %in% outs.ft),]
-
 #############################################################################
 ## Correlation - Numerical
 #############################################################################
 # This will show what variables correlate with SalesPrice 
 # and what could potentially be colinear if the variables correlate strongly
-train.num = Filter(is.numeric, train)
+# with each other
+train.num = Filter(is.numeric, train) # only numeric variables
 train.num.cor = cor(train.num)
 
+# curious what this shows
+cols = names(train.num) %in% c("Id", "SalePrice", "LotArea") # logical to see if included
+train.num.notVals = train.num[!cols]
+boxplot(train.num.notVals, las=2)
+boxplot(train$LotArea, main='LotArea Plot', ylab='LotArea')
+
+# Get subset of numericals without Id
+cols = names(train.num) %in% c("Id") # logical to see if included
+train.num.notId = train.num[!cols]
+
 # DataFrame of just correlation with SalesPrice
-cols = names(train.num) %in% c("Id") 
-train.num.notSalePrice = train.num[!cols]
-df.corr.SalesPrice = sort(data.frame(cor(train.num$SalePrice, 
-                                         train.num.notSalePrice)), decreasing = TRUE)
-cols = colnames(df.corr.SalesPrice)[0:15]
+df.corr.SalesPrice = data.frame(cor(train.num.notId$SalePrice, train.num.notId))
+# Get absolute value of correlation
+df.corr.SalesPrice = sort(abs(df.corr.SalesPrice), decreasing = TRUE)
+# Look at top 15 correlated variables
+cols = colnames(df.corr.SalesPrice)[0:15] # look at top 15 correlated variables
 train.num.sctr = train.num[cols]
+# Graph a scatter and correlation matrix together
 ggpairs(train.num.sctr,
         upper = list(continuous = wrap("cor", size = 4)),
         title = "Scatter Matrix") +
@@ -141,107 +145,427 @@ corrplot(train.num.cor, method = "color", col = col(200),
          p.mat = p.mat, sig.level = 0.01, insig = "blank", 
          diag = FALSE)
 
-#Set theme for scatter plots
-theme = theme(panel.background = element_rect(fill = '#ffffff'),
-              plot.title=element_text(size=16, hjust = 0.5),
-              axis.title.y=element_text(size = 12, vjust = 0.2,
-                                        margin = margin(t = 0, r = 20, b = 1, l = 0)),
-              axis.title.x=element_text(size = 12, vjust = 0.2,
-                                        margin = margin(t = 10, r = 0, b = 10, l = 5)),
-              axis.text.y=element_text(size = 10),
-              axis.text.x=element_text(size = 10),
-              panel.grid.major = element_blank(),
-              panel.grid.minor = element_blank())
 
-# Scatter Plot GrLivArea and Sale Price
+#############################################################################
+## Correlation - Categorical
+#############################################################################
+cols = colnames(train.num)
+cols = names(train) %in% cols[!cols %in% "SalePrice"] # not numeric values
+train.cat = train[!cols]
+train.cat.cor = cor(train.cat)
+
+# get dummy variables for each and remove first dummy for colinearity
+train.cat.dummy = fastDummies::dummy_cols(train.cat, remove_first_dummy = TRUE)
+cols = colnames(train.cat)
+# remove all non-dummy columns, but keep SalePrice
+cols = names(train.cat.dummy) %in% cols[!cols %in% "SalePrice"] 
+train.cat.dummy = train.cat.dummy[!cols] # final dataframe for analysis
+
+# DataFrame of just correlation with SalesPrice
+df.corr.SalesPrice.cat = data.frame(cor(train.cat.dummy$SalePrice, train.cat.dummy))
+# Get absolute value of correlation
+df.corr.SalesPrice.cat = sort(abs(df.corr.SalesPrice.cat), decreasing = TRUE)
+# Look at top 15 correlated variables
+cols = colnames(df.corr.SalesPrice.cat)[0:15]
+train.cat.sctr = train.cat.dummy[cols]
+# Since the top 6 correlated variables are related to specific areas and their quality
+# and neither of them has a correlation above 0.59, we can leverage the highly correlated
+# numerical variable "OverallQual" to summarize these less important categoricals
+cols
+# Graph a scatter and correlation matrix together
+ggpairs(train.cat.sctr,
+        upper = list(continuous = wrap("cor", size = 4)),
+        title = "Scatter Matrix") +
+  theme(plot.title=element_text(size=10, hjust = 0.5),
+        axis.title.y=element_text(size = 5, vjust = 0.2),
+        axis.title.x=element_text(size = 5, vjust = 0.2),
+        axis.text.y=element_text(size = 6),
+        axis.text.x=element_text(size = 7),
+        strip.text.y=element_text(size = 5, face = "bold"),
+        strip.text.x=element_text(size = 5, face = "bold"),
+        panel.grid.minor = element_blank(), 
+        panel.grid.major = element_blank())
+
+# Visualize Correlation Matrix in Heatmap
+corrplot(train.num.cor, method = "color", diag = FALSE) # Display the correlation coefficient
+
+#############################################################################
+## Exploration - Graphing
+#############################################################################
+
+############################################
+####### SCATTER PLOTS
+# Set theme for scatter plots
+scatt_theme = theme(panel.background = element_rect(fill = '#ffffff'),
+                    plot.title=element_text(size=16, hjust = 0.5),
+                    axis.title.y=element_text(size = 12, vjust = 0.2,
+                                              margin = margin(t = 0, r = 20, b = 1, l = 0)),
+                    axis.title.x=element_text(size = 12, vjust = 0.2,
+                                              margin = margin(t = 10, r = 0, b = 10, l = 5)),
+                    axis.text.y=element_text(size = 10),
+                    axis.text.x=element_text(size = 10),
+                    panel.grid.major = element_blank(),
+                    panel.grid.minor = element_blank())
+
+# Scatter Plot YearRemodAdd and SalePrice
+ggplot(train, aes(x=train$YearRemodAdd, y=train$SalePrice)) +
+  geom_point(shape=1) +     # Use hollow circles
+  geom_smooth(method=lm) +  # Add linear regression line (by default includes 95% confidence region)
+  ggtitle("YearBuilt and SalePrice") +
+  labs(x="YearBuilt", y="SalePrice") +
+  scale_y_continuous(labels = dollar) + 
+  scatt_theme
+
+# Scatter Plot GrLivArea and SalePrice
 ggplot(train, aes(x=train$GrLivArea, y=train$SalePrice)) +
   geom_point(shape=1) +     # Use hollow circles
   geom_smooth(method=lm) +  # Add linear regression line (by default includes 95% confidence region)
-  ggtitle("Living Room Area and Sale Price ($)") +
-  labs(x="Living Room Area", y="Sale Price ($)") +
+  ggtitle("GrLivArea and SalePrice") +
+  labs(x="GrLivArea", y="SalePrice") +
   scale_x_continuous(labels = comma) +
   scale_y_continuous(labels = dollar) + 
-  theme()
+  scatt_theme
 
-# Scatter Plot YearBuilt and SalePrice
-ggplot(train, aes(x=train$YearBuilt, y=train$SalePrice)) +
+# Scatter Plot GarageArea and SalePrice
+ggplot(train, aes(x=train$GarageArea, y=train$SalePrice)) +
   geom_point(shape=1) +     # Use hollow circles
   geom_smooth(method=lm) +  # Add linear regression line (by default includes 95% confidence region)
-  ggtitle("Year Built and Sale Price ($)") +
-  labs(x="Year Built", y="Year Built") +
-  #scale_x_continuous(labels = comma) +
+  ggtitle("GarageArea and SalePrice") +
+  labs(x="GarageArea", y="SalePrice") +
+  scale_x_continuous(labels = comma) +
   scale_y_continuous(labels = dollar) + 
-  theme()
+  scatt_theme
 
+# Scatter Plot TotalBsmtSF and SalePrice
+ggplot(train, aes(x=train$TotalBsmtSF, y=train$SalePrice)) +
+  geom_point(shape=1) +     # Use hollow circles
+  geom_smooth(method=lm) +  # Add linear regression line (by default includes 95% confidence region)
+  ggtitle("TotalBsmtSF and SalePrice") +
+  labs(x="TotalBsmtSF", y="SalePrice") +
+  scale_x_continuous(labels = comma) +
+  scale_y_continuous(labels = dollar) + 
+  scatt_theme
 
-
-
+############################################
+####### BOX PLOTS
+# Check unique values and create a factor
+unique(train$OverallQual)
+train$OverallQual = factor(train$OverallQual,
+                           c('1','2','3','4','5','6','7','8','9','10'))
+unique(train$GarageCars)
+train$GarageCars = factor(train$GarageCars,
+                          c('0','1','2','3','4'))
+unique(train$FullBath)
+train$FullBath = factor(train$FullBath,
+                        c('0','1','2','3'))
+unique(train$TotRmsAbvGrd)
+train$TotRmsAbvGrd = factor(train$TotRmsAbvGrd,
+                            c('2','3','4','5','6','7','8','9','10','11','12','14'))
+# GarageCars and SalesPrice
+ggplot(train, aes(x = OverallQual, y = SalePrice)) + 
+  geom_boxplot() + 
+  scale_y_continuous(labels = dollar)
+# GarageCars and SalesPrice
+ggplot(train, aes(x = GarageCars, y = SalePrice)) + 
+  geom_boxplot() + 
+  scale_y_continuous(labels = dollar)
+# OverallQual and SalesPrice by GarageCars
+ggplot(train, aes(x = OverallQual, y = SalePrice, fill = GarageCars)) + 
+  geom_boxplot() + 
+  scale_y_continuous(labels = dollar)
+# GarageCars and SalesPrice by FullBath
+ggplot(train, aes(x = GarageCars, y = SalePrice, fill = FullBath)) + 
+  geom_boxplot() + 
+  scale_y_continuous(labels = dollar)
 
 #############################################################################
-## Exploring MODELs
+## Exploring MODELS
 #############################################################################
-model = lm(train$SalePrice ~ ., data=train)
+# Read in data
+train = read.csv("train.csv"); train
 
-l <- sapply(train, function(x) is.factor(x))
-m <- train[, l]
-ifelse(n <- sapply(m, function(x) length(levels(x))) == 1, "DROP", "NODROP")
+#### Variable removal and selection due to colinearity
+# Used GarageCars over GarageArea, because they were highly correlated with each other
+# Used TotalBsmtSF over X1stFlrSF, because they were highly correlated with each other
+# Used GrLivArea over TotRmsAbvGrd, because they were highly correlated with each other
 
-summary(model)
-models = regsubsets(train$SalePrice ~ ., train, nvmax=6)
-summary(models)
-res.sum <- summary(models)
+#### Subsets Regression Method
+## FIRST APPROACH
+subs = regsubsets(SalePrice ~ OverallQual+GrLivArea+GarageCars+GarageArea+
+                  TotalBsmtSF+X1stFlrSF+FullBath+TotRmsAbvGrd+
+                  YearBuilt+YearRemodAdd+Fireplaces+BsmtFinSF1+
+                  WoodDeckSF+X2ndFlrSF, 
+                  data = train, nbest=1)
+# Plot a table of models showing variables in each model.
+subs.plot = plot(subs, scale = "adjr2", main = "Adjusted R^2")
+# Visualize subset size to hit statistic
+subs.plot.leg = subsets(subs, statistic="adjr2", legend = FALSE, min.size = 5, main = "Adjusted R^2")
+# This shows that we can use 5-8 variables for adjr2 above 0.77
+# OverallQual, GrLivArea, GarageCars, TotalBsmtSF, YearRemodAdd, Fireplaces, BsmtFinSF1 and WoodDeckSF
+# OverallQual, GrLivArea, GarageCars, TotalBsmtSF, YearRemodAdd, Fireplaces, and BsmtFinSF1
+# OverallQual, GrLivArea, GarageCars, TotalBsmtSF, YearRemodAdd, and BsmtFinSF1
+# OverallQual, GrLivArea, GarageCars, YearRemodAdd, and BsmtFinSF1
 
-stepAIC(model, direction="both")
+### Stepwise Regression Method after subsetting
+model1 = lm(SalePrice ~ OverallQual+GrLivArea+GarageCars+TotalBsmtSF+YearRemodAdd+Fireplaces+BsmtFinSF1+WoodDeckSF, data = train)
+step = stepAIC(model1, direction="both")
+step$anova # Shows to remove nothing
+model2 = lm(SalePrice ~ OverallQual+GrLivArea+GarageCars+TotalBsmtSF+YearRemodAdd+Fireplaces+BsmtFinSF1, data = train)
+model3 = lm(SalePrice ~ OverallQual+GrLivArea+GarageCars+TotalBsmtSF+YearRemodAdd+BsmtFinSF1, data = train)
+model4 = lm(SalePrice ~ OverallQual+GrLivArea+GarageCars+YearRemodAdd+BsmtFinSF1, data = train)
+summary(model1) # adj rsq of 0.7841
+summary(model2) # adj rsq of 0.7816
+summary(model3) # adj rsq of 0.7785
+summary(model4) # adj rsq of 0.7723
+# Compare the subset of the original model
+# Conventional to list models from smallest to largest
+anova(model2, model1, test = "F")
+anova(model3, model2, test = "F")
+anova(model4, model3, test = "F")
 
-vcov(models) # covariance matrix for model parameters 
-influence(models) # regression diagnostics
+## SECOND APPROACH
+# Getting data ready for bestglm
+train.subs = train[, c("OverallQual", "GrLivArea", "GarageCars",
+                       "GarageArea","TotalBsmtSF", "X1stFlrSF","FullBath",
+                       "TotRmsAbvGrd", "YearBuilt","YearRemodAdd","Fireplaces",
+                       "BsmtFinSF1","WoodDeckSF","X2ndFlrSF", "SalePrice")]
+colnames(train.subs)[colnames(train.subs) == "SalePrice"] = "y"
+train.subs
+train.bestglm = bestglm(Xy = train.subs, 
+                        family = gaussian,
+                        IC = "AIC", # Information criteria for
+                        method = "exhaustive")
+# Best models
+train.bestglm$BestModels
+# Summary of best model
+summary(train.bestglm$BestModel)
+# This has removed GrLivArea and FullBath from model, 
+# shows X1stFlrSF with a higher t-score than TotalBsmtSF (we can test with step-wise),
+# and shows GarageArea and TotRmsAbvGrd as not significant based on t-test
+# with adj rsq of 0.7867
+model5 = lm(SalePrice ~ OverallQual+GarageCars+TotalBsmtSF+X1stFlrSF+YearBuilt+YearRemodAdd+Fireplaces+
+              BsmtFinSF1+WoodDeckSF+X2ndFlrSF, data = train)
+step = stepAIC(model5, direction="both")
+step$anova # Shows to remove nothing
+# Removed TotalBsmtSF from model
+model6 = lm(SalePrice ~ OverallQual+GarageCars+X1stFlrSF+YearBuilt+YearRemodAdd+Fireplaces+
+              BsmtFinSF1+WoodDeckSF+X2ndFlrSF, data = train)
+summary(model5) # adj rsq of 0.7864 
+summary(model6) # adj rsq of 0.7852
+anova(model5, model6, test = "F")
 
-# Using GarageCars in lieu of GarageArea. They are highly correlated to each other,
-# which means I only needed to utilize one.
-# Using TotalBsmtSF in lieu of X1stFlrSF. They are highly correlated to each other,
-# which means I only needed to utilize one. I decided to go with the more continuous variable.
-model = lm(SalePrice ~ GrLivArea+GarageCars+TotalBsmtSF+YearBuilt+YearRemodAdd, data = train)
-summary(model)
+## THIRD APPROACH
+# The dropterm function considers each variable individually 
+# and considers what the change in residual sum of squares would be 
+# if this variable was excluded from the model. 
+# There is a link between this F test and the t test that appears 
+# as part of the model summary – this is because of the link 
+# between these two distributions
+model.drop = glm(SalePrice ~ OverallQual+GrLivArea+GarageCars+GarageArea+
+                  TotalBsmtSF+X1stFlrSF+FullBath+TotRmsAbvGrd+
+                  YearBuilt+YearRemodAdd+Fireplaces+BsmtFinSF1+
+                  WoodDeckSF+X2ndFlrSF, data = train)
+dropterm(model.drop,  test = "F")
+# Variables with 3 stars are:
+# OverallQual, GarageCars, YearBuilt, YearRemodAdd, Fireplaces, BsmtFinSF1, WoodDeckSF
+# Variables with 2 stars are:
+# TotalBsmtSF
+# Variables with 0 stars are:
+# GrLivArea, GarageArea, X1stFlrSF, FullBath, TotRmsAbvGrd, X2ndFlrSF
+model7 = lm(SalePrice ~ OverallQual+GarageCars+YearBuilt+YearRemodAdd+Fireplaces+
+              BsmtFinSF1+WoodDeckSF, data = train)
+summary(model7) # adj rsq of 0.7268
+
+
+###########################
+# Best 2 models 
+# model1 with adj rsq of 0.7841 (8 variables)
+# model5 with adj rsq of 0.7864 (10 variables)
+###########################
+# K-fold cross-validation
+train_Control = trainControl(method = "cv", number = 10, savePredictions = TRUE) # number of folds
+model.model1 = train(SalePrice ~ OverallQual+GrLivArea+GarageCars+TotalBsmtSF+YearRemodAdd+Fireplaces+BsmtFinSF1+WoodDeckSF, 
+                     data = train, 
+                     "lm",
+                     trControl = train_Control)
+model.model5 = train(SalePrice ~ OverallQual+GarageCars+TotalBsmtSF+X1stFlrSF+YearBuilt+YearRemodAdd+Fireplaces+BsmtFinSF1+WoodDeckSF+X2ndFlrSF, 
+                     data = train, 
+                     "lm",
+                     trControl = train_Control)
+# Summarise Results
+# 0.78 - 0.8 when cross-validating multiple times
+print(model.model1)
+model.model1$results
+print(model.model5)
+model.model5$results
+# Model 1 seems to have the best overall results in terms of adj rsq and minimization of errors
+# and has a lower RMSE
 
 #############################################################################
 ## MODEL
 #############################################################################
-model = lm(`Selling price` ~ Mountain+Garage+TotalBRooms+Sq_Ft, data = ski) 
-# the model performed a good bit better when not pulling out outliers for "Mountain"
-# and "Sq_Ft". Additonally, adding in things like "Age" or "On Market" decreased model performance.
-#0.6714 w/ou outlier removal
-#0.8399 remove outliers for Lot Size
-#0.843 remove outliers for Lot Size and Age
-#0.8423 remove outliers for Lot Size and Age and Garage
-
-# It should be noted that removing Age from the model didn't really affect performance, but it
-# would cost 1 degree of freedom to utilize. Age had a low p-value and would probably
-# affect the model more poorly on a larger scale.
+model = lm(SalePrice ~ OverallQual+GrLivArea+GarageCars+TotalBsmtSF+YearRemodAdd+Fireplaces+BsmtFinSF1+WoodDeckSF, data = train) 
 
 #############################################################################
 # Give summary of the model
-summary(model)
+summary(model) # adj rsq of 0.7841
 anova(model)
 model$coefficients
-
-ols_step_best_subset(model)
-
 
 #############################################################################
 ## Validate the Model assumptions
 # Residual plot
-plot(ski$`Selling price`, model$residuals, xlab = 'Selling Price', ylab='Residuals', main =
-       'Residual Plot')
-abline(h=0, col = 'red')
+plot(train$SalePrice, model$residuals, xlab = 'Sale Price', ylab='Residuals', main ='Residual Plot')
+abline(h = 0, col = 'red')
 # Plot of Actual vs Predicted
-plot(predict(model),ski$`Selling price`,
-     xlab="predicted",ylab="actual")
-abline(a=0,b=1)
+plot(predict(model), train$SalePrice, xlab = "Predicted", ylab = "Actual", main ='Residual vs Actual Plot')
+abline(a = 0, b = 1, col = 'red')
 # Normal probability plot of residuals
 qqnorm(model$residuals)
-qqline(model$residuals, col = 2) #fails because it is not a straight line
+qqline(model$residuals, col = "red") #fails because it is not a straight line
 # Durbin Watson test
 durbinWatsonTest(model)
 # Colinearity
-vif(model)
+vif(model) # no colinearity detected
+
+# Histogram for Residuals
+qplot(model$residuals,
+      geom="histogram",
+      #breaks=seq(315, 545, by = n),
+      bins=15,
+      main = "Histogram for Residuals", 
+      xlab = "Residuals",
+      ylab = 'Count',
+      fill=I("black"), 
+      col=I("gray")) +
+  scale_x_continuous(labels = dollar) +
+  theme(panel.background = element_rect(fill = '#ffffff'),
+        plot.title=element_text(size=16, hjust = 0.3),
+        axis.title.y=element_text(size = 12, vjust = 0.2,
+                                  margin = margin(t = 0, r = 20, b = 1, l = 0)),
+        axis.title.x=element_text(size = 12, vjust = 0.2,
+                                  margin = margin(t = 10, r = 0, b = 10, l = 5)),
+        axis.text.y=element_text(size = 10),
+        axis.text.x=element_text(size = 10),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank())
+
+#############################################################################
+## MODEL - Adjustments
+#############################################################################
+# Adjustments after looking at the normal probabilty plot of residuals
+# skewed data that could use log transform
+train$SalePrice_log = log(train$SalePrice) # right-skewed
+train$GrLivArea_log = log(train$GrLivArea) # right-skewed
+train$TotalBsmtSF_log = log(train$TotalBsmtSF) # right-skewed
+train$X1stFlrSF_log = log(train$X1stFlrSF) # right-skewed
+train$YearBuilt_log = log(train$YearBuilt) # left-skewed
+train$YearBuilt_sqrt = sqrt(train$YearBuilt) # left-skewed
+train$YearBuilt_cubert = sign(train$YearBuilt) * abs(train$YearBuilt)^(1/3) # left-skewed
+train$YearBuilt_log10 = log10(train$YearBuilt) # left-skewed
+train$YearRemodAdd_log = log(train$YearRemodAdd) # left-skewed
+train$YearRemodAdd_sqrt = sqrt(train$YearRemodAdd) # left-skewed
+train$YearRemodAdd_cubert = sign(train$YearRemodAdd) * abs(train$YearRemodAdd)^(1/3) # left-skewed
+train$YearRemodAdd_log10 = log10(train$YearRemodAdd) # left-skewed
+train$YearRemodAdd_norm = (train$YearRemodAdd - min(train$YearRemodAdd)) / (max(train$YearRemodAdd) - min(train$YearRemodAdd))  # left-skewed
+train$YearRemodAdd_mean = abs(train$YearRemodAdd - mean(train$YearRemodAdd)) # left-skewed
+train$BsmtFinSF1_log = log(train$BsmtFinSF1) # right-skewed
+train$WoodDeckSF_log = log(train$WoodDeckSF) # right-skewed
+train$X2ndFlrSF_log = log(train$X2ndFlrSF) # right-skewed
+
+# clean up data where there was a log transformation on a column with a value of 0 within it
+# GrLivArea_log
+train$GrLivArea_log[which(is.nan(train$GrLivArea_log))] = NA
+train$GrLivArea_log[which(train$GrLivArea_log == Inf)] = NA
+train$GrLivArea_log[which(train$GrLivArea_log == -Inf)] = NA
+# TotalBsmtSF_log
+train$TotalBsmtSF_log[which(is.nan(train$TotalBsmtSF_log))] = NA
+train$TotalBsmtSF_log[which(train$TotalBsmtSF_log == Inf)] = NA
+train$TotalBsmtSF_log[which(train$TotalBsmtSF_log == -Inf)] = NA
+# BsmtFinSF1_log
+train$BsmtFinSF1_log[which(is.nan(train$BsmtFinSF1_log))] = NA
+train$BsmtFinSF1_log[which(train$BsmtFinSF1_log == Inf)] = NA
+train$BsmtFinSF1_log[which(train$BsmtFinSF1_log == -Inf)] = NA
+# WoodDeckSF_log
+train$WoodDeckSF_log[which(is.nan(train$WoodDeckSF_log))] = NA
+train$WoodDeckSF_log[which(train$WoodDeckSF_log == Inf)] = NA
+train$WoodDeckSF_log[which(train$WoodDeckSF_log == -Inf)] = NA
+# X2ndFlrSF_log
+train$X2ndFlrSF_log[which(is.nan(train$X2ndFlrSF_log))] = NA
+train$X2ndFlrSF_log[which(train$X2ndFlrSF_log == Inf)] = NA
+train$X2ndFlrSF_log[which(train$X2ndFlrSF_log == -Inf)] = NA
+# verify the errors were removed
+psych::describe(train$SalePrice_log)
+psych::describe(train$GrLivArea_log)
+psych::describe(train$TotalBsmtSF_log)
+psych::describe(train$X1stFlrSF_log)
+psych::describe(train$YearRemodAdd_mean)
+psych::describe(train$BsmtFinSF1_log)
+psych::describe(train$WoodDeckSF_log)
+psych::describe(train$X2ndFlrSF_log)
+
+#############################################################################
+#### REVISIT CORRELATION
+train.num = Filter(is.numeric, train) # only numeric variables
+train.num.cor = cor(train.num)
+cols = names(train.num) %in% c("Id","SalePrice") # logical to see if included
+train.num.notId = train.num[!cols]
+# DataFrame of just correlation with SalePrice_log
+df.corr.SalePrice_log = data.frame(cor(train.num.notId$SalePrice_log, train.num.notId))
+# Get absolute value of correlation
+df.corr.SalePrice_log = sort(abs(df.corr.SalePrice_log), decreasing = TRUE)
+# Look at top 20 correlated variables
+cols = colnames(df.corr.SalePrice_log)[0:20]
+train.num.sctr = train.num[cols]
+# Graph a scatter and correlation matrix together
+ggpairs(train.num.sctr,
+        upper = list(continuous = wrap("cor", size = 4)),
+        title = "Scatter Matrix") +
+  theme(plot.title=element_text(size=10, hjust = 0.5),
+        axis.title.y=element_text(size = 5, vjust = 0.2),
+        axis.title.x=element_text(size = 5, vjust = 0.2),
+        axis.text.y=element_text(size = 6),
+        axis.text.x=element_text(size = 7),
+        strip.text.y=element_text(size = 5, face = "bold"),
+        strip.text.x=element_text(size = 6, face = "bold"),
+        panel.grid.minor = element_blank(), 
+        panel.grid.major = element_blank()) # dev.off() run this command in case plot sticks
+
+#############################################################################
+#### Subsets Regression Method
+subs = regsubsets(SalePrice_log ~ OverallQual+GrLivArea+GarageCars+GarageArea+
+                  TotalBsmtSF+X1stFlrSF+FullBath+TotRmsAbvGrd+
+                  YearBuilt+YearRemodAdd+Fireplaces+BsmtFinSF1+
+                  WoodDeckSF+X2ndFlrSF+GrLivArea_log+TotalBsmtSF_log+
+                  X1stFlrSF_log+YearRemodAdd_mean+BsmtFinSF1_log+
+                  WoodDeckSF_log+X2ndFlrSF_log, 
+                  data = train, nbest=1)
+# Plot a table of models showing variables in each model.
+subs.plot = plot(subs, scale = "adjr2", main = "Adjusted R^2")
+# Visualize subset size to hit statistic
+subs.plot.leg = subsets(subs, statistic="adjr2", legend = FALSE, min.size = 5, main = "Adjusted R^2")
+
+#### bestglm Subsets Regression Method
+train.subs = train[, c("OverallQual", "GrLivArea", "GarageCars",
+                       "GarageArea","TotalBsmtSF", "X1stFlrSF","FullBath",
+                       "TotRmsAbvGrd", "YearBuilt","YearRemodAdd","Fireplaces",
+                       "BsmtFinSF1","WoodDeckSF","X2ndFlrSF",
+                       "GrLivArea_log","TotalBsmtSF_log","X1stFlrSF_log","YearRemodAdd_mean",
+                       "BsmtFinSF1_log","WoodDeckSF_log","X2ndFlrSF_log","SalePrice_log")]
+colnames(train.subs)[colnames(train.subs) == "SalePrice_log"] = "y"
+train.subs
+train.bestglm = bestglm(Xy = train.subs, 
+                        family = gaussian,
+                        IC = "AIC", # Information criteria for
+                        method = "exhaustive")
+# Best models
+train.bestglm$BestModels
+# Summary of best model
+summary(train.bestglm$BestModel)
+
+
+model.test = lm(SalePrice_log ~ OverallQual+GarageCars+X1stFlrSF_log+YearBuilt+YearRemodAdd+X2ndFlrSF, data = train)
+summary(model.test)
+vif(model.test)
+
 

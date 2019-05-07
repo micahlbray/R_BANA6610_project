@@ -1,6 +1,6 @@
-cd C:/Users/mbray/Dropbox/Grad\ School/CU\ Denver/BANA_6610/project
 git init
 
+cd C:/Users/mbray/Dropbox/Grad\ School/CU\ Denver/BANA_6610/project
 git add -A
 git commit -m "Your message here."
 
