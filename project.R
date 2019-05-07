@@ -1,12 +1,13 @@
 library(tidyverse)
 #library(readxl)
 #library(ggplot2)
-#library(GGally)
+library(GGally)
 #library(dplyr)
 library(corrplot)
 require(scales)
 library(psych) # summarize data set
 library(fastDummies) # dummy variables
+library(ltm) # biserial correlation for categoricals
 library(DAAG) # k-folds
 library(MASS) # stepAIC
 library(leaps) # subsets regression
@@ -14,8 +15,9 @@ library(car) # plot subsets
 library(bestglm) # subsets regression
 library(rsq) # create r square estimate for glm
 library(caret) # k-folds cross-validation
+library(ggvis) # adjr2 viz
 
-# Read in data
+# Read in the training data
 train = read.csv("train.csv"); train
 
 #############################################################################
@@ -150,9 +152,8 @@ corrplot(train.num.cor, method = "color", col = col(200),
 ## Correlation - Categorical
 #############################################################################
 cols = colnames(train.num)
-cols = names(train) %in% cols[!cols %in% "SalePrice"] # not numeric values
+cols = names(train) %in% cols[!cols %in% "SalePrice_log"] # not numeric values
 train.cat = train[!cols]
-train.cat.cor = cor(train.cat)
 
 # get dummy variables for each and remove first dummy for colinearity
 train.cat.dummy = fastDummies::dummy_cols(train.cat, remove_first_dummy = TRUE)
@@ -161,12 +162,13 @@ cols = colnames(train.cat)
 cols = names(train.cat.dummy) %in% cols[!cols %in% "SalePrice"] 
 train.cat.dummy = train.cat.dummy[!cols] # final dataframe for analysis
 
+colnames(train.cat.dummy)
 # DataFrame of just correlation with SalesPrice
 df.corr.SalesPrice.cat = data.frame(cor(train.cat.dummy$SalePrice, train.cat.dummy))
 # Get absolute value of correlation
 df.corr.SalesPrice.cat = sort(abs(df.corr.SalesPrice.cat), decreasing = TRUE)
 # Look at top 15 correlated variables
-cols = colnames(df.corr.SalesPrice.cat)[0:15]
+cols = colnames(df.biscorr.SalesPrice.cat)[0:15]
 train.cat.sctr = train.cat.dummy[cols]
 # Since the top 6 correlated variables are related to specific areas and their quality
 # and neither of them has a correlation above 0.59, we can leverage the highly correlated
@@ -454,21 +456,25 @@ qplot(model$residuals,
 ## MODEL - Adjustments
 #############################################################################
 # Adjustments after looking at the normal probabilty plot of residuals
-# skewed data that could use log transform
+# skewed data that could use log transform and removing the
+# transforms on YearBuilt and YearRemodAdd, because they didn't add
+# any value (the correlation was the same as the normal variable). 
+# The data for YearRemodAdd seems bimodal and not sure what to do with it.
+
 train$SalePrice_log = log(train$SalePrice) # right-skewed
 train$GrLivArea_log = log(train$GrLivArea) # right-skewed
 train$TotalBsmtSF_log = log(train$TotalBsmtSF) # right-skewed
 train$X1stFlrSF_log = log(train$X1stFlrSF) # right-skewed
-train$YearBuilt_log = log(train$YearBuilt) # left-skewed
-train$YearBuilt_sqrt = sqrt(train$YearBuilt) # left-skewed
-train$YearBuilt_cubert = sign(train$YearBuilt) * abs(train$YearBuilt)^(1/3) # left-skewed
-train$YearBuilt_log10 = log10(train$YearBuilt) # left-skewed
-train$YearRemodAdd_log = log(train$YearRemodAdd) # left-skewed
-train$YearRemodAdd_sqrt = sqrt(train$YearRemodAdd) # left-skewed
-train$YearRemodAdd_cubert = sign(train$YearRemodAdd) * abs(train$YearRemodAdd)^(1/3) # left-skewed
-train$YearRemodAdd_log10 = log10(train$YearRemodAdd) # left-skewed
-train$YearRemodAdd_norm = (train$YearRemodAdd - min(train$YearRemodAdd)) / (max(train$YearRemodAdd) - min(train$YearRemodAdd))  # left-skewed
-train$YearRemodAdd_mean = abs(train$YearRemodAdd - mean(train$YearRemodAdd)) # left-skewed
+#train$YearBuilt_log = log(train$YearBuilt) # left-skewed
+#train$YearBuilt_sqrt = sqrt(train$YearBuilt) # left-skewed
+#train$YearBuilt_cubert = sign(train$YearBuilt) * abs(train$YearBuilt)^(1/3) # left-skewed
+#train$YearBuilt_log10 = log10(train$YearBuilt) # left-skewed
+#train$YearRemodAdd_log = log(train$YearRemodAdd) # left-skewed
+#train$YearRemodAdd_sqrt = sqrt(train$YearRemodAdd) # left-skewed
+#train$YearRemodAdd_cubert = sign(train$YearRemodAdd) * abs(train$YearRemodAdd)^(1/3) # left-skewed
+#train$YearRemodAdd_log10 = log10(train$YearRemodAdd) # left-skewed
+#train$YearRemodAdd_norm = (train$YearRemodAdd - min(train$YearRemodAdd)) / (max(train$YearRemodAdd) - min(train$YearRemodAdd))  # left-skewed
+#train$YearRemodAdd_mean = abs(train$YearRemodAdd - mean(train$YearRemodAdd)) # left-skewed
 train$BsmtFinSF1_log = log(train$BsmtFinSF1) # right-skewed
 train$WoodDeckSF_log = log(train$WoodDeckSF) # right-skewed
 train$X2ndFlrSF_log = log(train$X2ndFlrSF) # right-skewed
@@ -499,7 +505,7 @@ psych::describe(train$SalePrice_log)
 psych::describe(train$GrLivArea_log)
 psych::describe(train$TotalBsmtSF_log)
 psych::describe(train$X1stFlrSF_log)
-psych::describe(train$YearRemodAdd_mean)
+#psych::describe(train$YearRemodAdd_mean)
 psych::describe(train$BsmtFinSF1_log)
 psych::describe(train$WoodDeckSF_log)
 psych::describe(train$X2ndFlrSF_log)
@@ -507,7 +513,6 @@ psych::describe(train$X2ndFlrSF_log)
 #############################################################################
 #### REVISIT CORRELATION
 train.num = Filter(is.numeric, train) # only numeric variables
-train.num.cor = cor(train.num)
 cols = names(train.num) %in% c("Id","SalePrice") # logical to see if included
 train.num.notId = train.num[!cols]
 # DataFrame of just correlation with SalePrice_log
@@ -519,41 +524,113 @@ cols = colnames(df.corr.SalePrice_log)[0:20]
 train.num.sctr = train.num[cols]
 # Graph a scatter and correlation matrix together
 ggpairs(train.num.sctr,
-        upper = list(continuous = wrap("cor", size = 4)),
+        upper = list(continuous = wrap("cor", size = 3)),
         title = "Scatter Matrix") +
   theme(plot.title=element_text(size=10, hjust = 0.5),
         axis.title.y=element_text(size = 5, vjust = 0.2),
         axis.title.x=element_text(size = 5, vjust = 0.2),
         axis.text.y=element_text(size = 6),
         axis.text.x=element_text(size = 7),
-        strip.text.y=element_text(size = 5, face = "bold"),
-        strip.text.x=element_text(size = 6, face = "bold"),
+        strip.text.y=element_text(size = 4, face = "bold"),
+        strip.text.x=element_text(size = 5, face = "bold"),
         panel.grid.minor = element_blank(), 
         panel.grid.major = element_blank()) # dev.off() run this command in case plot sticks
 
 #############################################################################
+#### Variable removal and selection due to colinearity
+# Used X1stFlrSF_log over X1stFlrSF, because they were highly correlated with each other
+# Used X2ndFlrSF over X2ndFlrSF_log, because they were highly correlated with each other
+# Best subsets kept putting all 4 of these variables in the model, which created
+# a huge problem with colinearity. Not giving it the opportunity.
+
 #### Subsets Regression Method
 subs = regsubsets(SalePrice_log ~ OverallQual+GrLivArea+GarageCars+GarageArea+
                   TotalBsmtSF+X1stFlrSF+FullBath+TotRmsAbvGrd+
                   YearBuilt+YearRemodAdd+Fireplaces+BsmtFinSF1+
                   WoodDeckSF+X2ndFlrSF+GrLivArea_log+TotalBsmtSF_log+
-                  X1stFlrSF_log+YearRemodAdd_mean+BsmtFinSF1_log+
-                  WoodDeckSF_log+X2ndFlrSF_log, 
+                  X1stFlrSF_log+BsmtFinSF1_log+WoodDeckSF_log, 
                   data = train, nbest=1)
 # Plot a table of models showing variables in each model.
-subs.plot = plot(subs, scale = "adjr2", main = "Adjusted R^2")
+subs.plot.bar = plot(subs, scale = "adjr2", main = "Best Subsets by Adjusted R^2")
 # Visualize subset size to hit statistic
-subs.plot.leg = subsets(subs, statistic="adjr2", legend = FALSE, min.size = 5, main = "Adjusted R^2")
+subs.plot.leg = subsets(subs, statistic="adjr2", legend = FALSE, min.size = 2, max.size = 9,  main = "Best Subsets by Adjusted R^2")
+# Print labels
+subs.plot.leg
+# Arcing point graph
+subs.sum.df.adjr2 = as.data.frame(subs.sum$adjr2)
+names(subs.sum.df.adjr2) = "R2"
+subs.sum.df.adjr2 %>% 
+  ggvis(x=~ c(1:nrow(subs.sum.df.adjr2)), y=~R2 ) %>%
+  layer_points(fill = ~ R2 ) %>%
+  add_axis("y", title = "Adjusted R^2") %>% 
+  add_axis("x", title = "Subset Size")
+# Line graph
+ggplot(subs.sum.df.adjr2, 
+       aes(x = seq(1, nrow(subs.sum.df.adjr2), by = 1), 
+           y = subs.sum.df.adjr2$R2)) +
+  geom_line(aes(group=1)) +
+  geom_point(size=3) +
+  #geom_text(aes(label=Name),hjust=0, vjust=0)
+  ggtitle("Best Subsets by Adjusted R^2") +
+  labs(x="Subset Size", y="Adjusted R^2") +
+  scale_x_continuous(breaks=seq(0, 8, 1)) + 
+  theme(plot.title=element_text(size=16, face = "bold", hjust = 0.5),
+        axis.title.y=element_text(size = 12, face = "bold", vjust = 0.2,
+                                  margin = margin(t = 0, r = 20, b = 1, l = 0)),
+        axis.title.x=element_text(size = 12, face = "bold", vjust = 0.2,
+                                  margin = margin(t = 10, r = 0, b = 10, l = 5)),
+        axis.text.y=element_text(size = 10),
+        axis.text.x=element_text(size = 10))
 
+#############################################################################
+#### Use Leaps
+# Structure data
+# Look at top 30 correlated variables
+cols = colnames(df.corr.SalePrice_log)[0:30]
+train.num.sctr = train.num[cols]
+# Remove SP
+cols = names(train.num.sctr) %in% c("SalePrice_log") # logical to see if included
+train.num.sctr.notSP = train.num.sctr[!cols]
+# Create leap object
+leap = leaps(x = train.num.sctr.notSP, y = train.num.sctr$SalePrice_log, 
+             method = "adjr2", nbest = 1,
+             name = names(train.num.sctr.notSP))
+# Create df for graphing
+vars = as.data.frame(leap$which)
+adjr2 = leap$adjr2
+sz = leap$size - 1
+#lbl = leap$label
+leaps.sum.df.adjr2 = data.frame(size = sz,
+                                adjr2 = adjr2)
+# Combine data frames
+leaps.sum.df = cbind(leaps.sum.df.adjr2, vars)
+# Line graph
+ggplot(leaps.sum.df, 
+       aes(x = leaps.sum.df$size, y = leaps.sum.df$adjr2)) +
+  geom_line(aes(group=1)) +
+  geom_point(size=3) +
+  #geom_text(aes(label=Name),hjust=0, vjust=0)
+  ggtitle("Best Subsets by Adjusted R^2") +
+  labs(x="Subset Size", y="Adjusted R^2") +
+  scale_x_continuous(breaks=seq(1, 30, 1)) + 
+  theme(plot.title=element_text(size=16, face = "bold", hjust = 0.5),
+        axis.title.y=element_text(size = 12, face = "bold", vjust = 0.2,
+                                  margin = margin(t = 0, r = 20, b = 1, l = 0)),
+        axis.title.x=element_text(size = 12, face = "bold", vjust = 0.2,
+                                  margin = margin(t = 10, r = 0, b = 10, l = 5)),
+        axis.text.y=element_text(size = 10),
+        axis.text.x=element_text(size = 10))
+
+# Best models 
+leaps.sum.df[10:12, ]
+leaps.sum.df[12:12, ]
+write.csv(leaps.sum.df, 
+          "C:/Users/mbray/Dropbox/Grad School/CU Denver/BANA_6610/project/subset.csv", 
+          row.names = FALSE)
+
+#############################################################################
 #### bestglm Subsets Regression Method
-train.subs = train[, c("OverallQual", "GrLivArea", "GarageCars",
-                       "GarageArea","TotalBsmtSF", "X1stFlrSF","FullBath",
-                       "TotRmsAbvGrd", "YearBuilt","YearRemodAdd","Fireplaces",
-                       "BsmtFinSF1","WoodDeckSF","X2ndFlrSF",
-                       "GrLivArea_log","TotalBsmtSF_log","X1stFlrSF_log","YearRemodAdd_mean",
-                       "BsmtFinSF1_log","WoodDeckSF_log","X2ndFlrSF_log","SalePrice_log")]
-colnames(train.subs)[colnames(train.subs) == "SalePrice_log"] = "y"
-train.subs
+train.subs = cbind(train.num.sctr.notSP, train.num.sctr$SalePrice_log)
 train.bestglm = bestglm(Xy = train.subs, 
                         family = gaussian,
                         IC = "AIC", # Information criteria for
@@ -563,9 +640,189 @@ train.bestglm$BestModels
 # Summary of best model
 summary(train.bestglm$BestModel)
 
+#############################################################################
+## MODEL - Final
+#############################################################################
+# Model 1
+model1 = lm(SalePrice_log ~ OverallQual+GrLivArea_log+GarageCars+
+              TotalBsmtSF+YearBuilt+YearRemodAdd+BsmtFinSF1+
+              LotArea+MSSubClass, data = train)
+summary(model1) #adjr2 of 0.8485
+model1.2 = lm(SalePrice_log ~ OverallQual+GrLivArea_log+GarageCars+
+              TotalBsmtSF+YearBuilt+YearRemodAdd+Fireplaces+
+              BsmtFinSF1+LotArea+MSSubClass, data = train)
+summary(model1.2) #adjr2 of 0.8531
+model1.3 = lm(SalePrice_log ~ OverallQual+GrLivArea_log+GarageCars+
+                YearBuilt+YearRemodAdd+Fireplaces+
+                BsmtFinSF1+LotArea+MSSubClass, data = train)
+summary(model1.3) #adjr2 of 0.8524
+# Model 2
+model2 = lm(SalePrice_log ~ OverallQual+GrLivArea_log+GarageCars+
+             TotalBsmtSF+X1stFlrSF_log+YearBuilt+YearRemodAdd+
+             Fireplaces+LotArea+BsmtUnfSF+MSSubClass, data = train)
+summary(model2) # adjr2 of 0.8551
+model2.1 = lm(SalePrice_log ~ OverallQual+GrLivArea_log+GarageCars+
+                TotalBsmtSF+YearBuilt+YearRemodAdd+
+                Fireplaces+LotArea+BsmtUnfSF+MSSubClass, data = train)
+summary(model2.1) # adjr2 of 0.8542
+# Model 3
+model3 = lm(SalePrice_log ~ OverallQual+GrLivArea_log+GarageCars+
+            TotalBsmtSF+X1stFlrSF_log+FullBath+YearBuilt+YearRemodAdd+
+            Fireplaces+WoodDeckSF+X2ndFlrSF+LotArea+BsmtFullBath+
+            BsmtUnfSF+KitchenAbvGr+ScreenPorch+MSSubClass+PoolArea, 
+            data = train)
+summary(model3) # adjr2 of 0.8637
+model3.1 = lm(SalePrice_log ~ OverallQual+GrLivArea_log+GarageCars+
+              TotalBsmtSF+X1stFlrSF_log+YearBuilt+YearRemodAdd+
+              Fireplaces+WoodDeckSF+X2ndFlrSF+LotArea+BsmtFullBath+
+              BsmtUnfSF+KitchenAbvGr+ScreenPorch+MSSubClass+PoolArea, 
+              data = train)
+summary(model3.1) # adjr2 of 0.8637
+# Model 4
+model4 = lm(SalePrice_log ~ OverallQual+GrLivArea_log+GarageCars+
+              TotalBsmtSF+X1stFlrSF_log+FullBath+YearBuilt+YearRemodAdd+
+              TotRmsAbvGrd+Fireplaces+BsmtFinSF1+WoodDeckSF+X2ndFlrSF+
+              HalfBath+LotArea+BsmtFullBath+BsmtUnfSF+BedroomAbvGr+
+              KitchenAbvGr+ScreenPorch+MSSubClass+PoolArea+X3SsnPorch, 
+            data = train)
+summary(model4) # adjr2 of 0.8637
+model4.1 = lm(SalePrice_log ~ OverallQual+GrLivArea_log+GarageCars+
+              TotalBsmtSF+X1stFlrSF_log+FullBath+YearBuilt+YearRemodAdd+
+              Fireplaces+BsmtFinSF1+WoodDeckSF+X2ndFlrSF+
+              HalfBath+LotArea+BsmtFullBath+BsmtUnfSF+BedroomAbvGr+
+              KitchenAbvGr+ScreenPorch+MSSubClass+PoolArea+X3SsnPorch, 
+            data = train)
+summary(model4.1) # adjr2 of 0.8638
+model4.2 = lm(SalePrice_log ~ OverallQual+GrLivArea_log+GarageCars+
+                X1stFlrSF_log+YearBuilt+YearRemodAdd+
+                Fireplaces+WoodDeckSF+X2ndFlrSF+LotArea+BsmtFullBath+
+                KitchenAbvGr+ScreenPorch+MSSubClass+PoolArea, 
+              data = train)
+summary(model4.2) # adjr2 of 0.862
 
-model.test = lm(SalePrice_log ~ OverallQual+GarageCars+X1stFlrSF_log+YearBuilt+YearRemodAdd+X2ndFlrSF, data = train)
-summary(model.test)
-vif(model.test)
+#############################################################################
+# K-fold cross-validation
+train_Control = trainControl(method = "cv", number = 10, savePredictions = TRUE) # number of folds
+# Model 1.3 from Model 1
+model.model1 = train(SalePrice_log ~ OverallQual+GrLivArea_log+GarageCars+
+                     YearBuilt+YearRemodAdd+Fireplaces+
+                     BsmtFinSF1+LotArea+MSSubClass, 
+                     data = train, 
+                     "lm",
+                     trControl = train_Control)
+# Model 2.1 from Model 2
+model.model2 = train(SalePrice_log ~ OverallQual+GrLivArea_log+GarageCars+
+                     TotalBsmtSF+YearBuilt+YearRemodAdd+
+                     Fireplaces+LotArea+BsmtUnfSF+MSSubClass, 
+                     data = train, 
+                     "lm",
+                     trControl = train_Control)
+# Model 3.1 from Model 3
+model.model3 = train(SalePrice_log ~ OverallQual+GrLivArea_log+GarageCars+
+                     TotalBsmtSF+X1stFlrSF_log+YearBuilt+YearRemodAdd+
+                     Fireplaces+WoodDeckSF+X2ndFlrSF+LotArea+BsmtFullBath+
+                     BsmtUnfSF+KitchenAbvGr+ScreenPorch+MSSubClass+PoolArea, 
+                     data = train, 
+                     "lm",
+                     trControl = train_Control)
+# Model 4 from Model 3.1 without GrLivArea_log
+model.model4 = train(SalePrice_log ~ OverallQual+GarageCars+
+                    TotalBsmtSF+X1stFlrSF_log+YearBuilt+YearRemodAdd+
+                     Fireplaces+WoodDeckSF+X2ndFlrSF+LotArea+BsmtFullBath+
+                     BsmtUnfSF+KitchenAbvGr+ScreenPorch+MSSubClass+PoolArea, 
+                     data = train, 
+                     "lm",
+                     trControl = train_Control)
+# Summarise Results
+#print(model.model1)
+model.model1$results
+#print(model.model2)
+model.model2$results
+#print(model.model3)
+model.model3$results
+#print(model.model4)
+model.model4$results
+# Model 3 seems to have the best overall results in terms of adj rsq and minimization of errors
+# and has a lower RMSE
+
+#############################################################################
+## Validate the Model assumptions
+# Model
+model.final.1 = lm(SalePrice_log ~ OverallQual+GrLivArea_log+GarageCars+
+           TotalBsmtSF+X1stFlrSF_log+YearBuilt+YearRemodAdd+
+           Fireplaces+WoodDeckSF+X2ndFlrSF+LotArea+BsmtFullBath+
+           BsmtUnfSF+KitchenAbvGr+ScreenPorch+MSSubClass+PoolArea, 
+           data = train)
+summary(model.final.1) # adjr2 of 0.8637
+# X2ndFlrSF over GrLivArea_log due to colinearity
+model.final.2 = lm(SalePrice_log ~ OverallQual+GarageCars+
+             TotalBsmtSF+X1stFlrSF_log+YearBuilt+YearRemodAdd+
+             Fireplaces+WoodDeckSF+X2ndFlrSF+LotArea+BsmtFullBath+
+             BsmtUnfSF+KitchenAbvGr+ScreenPorch+MSSubClass+PoolArea, 
+           data = train)
+summary(model.final.2) # adjr2 of 0.8628
+# GrLivArea_log over X2ndFlrSF due to colinearity
+model.final.3 = lm(SalePrice_log ~ OverallQual+GrLivArea_log+GarageCars+
+             TotalBsmtSF+X1stFlrSF_log+YearBuilt+YearRemodAdd+
+             Fireplaces+WoodDeckSF+LotArea+BsmtFullBath+
+             BsmtUnfSF+KitchenAbvGr+ScreenPorch+MSSubClass+PoolArea, 
+           data = train)
+summary(model.final.3) # adjr2 of 0.8616
 
 
+# Set model to final model
+model = model.final.2
+# Check the RMSE
+RSS = c(crossprod(model$residuals))
+MSE = RSS / length(model$residuals)
+RMSE = sqrt(MSE); RMSE
+# Residual plot
+plot(train$SalePrice_log, model$residuals, xlab = 'Sale Price', ylab='Residuals', main ='Residual Plot')
+abline(h = 0, col = 'red')
+# Plot of Actual vs Predicted
+plot(predict(model), train$SalePrice_log, xlab = "Predicted", ylab = "Actual", main ='Residual vs Actual Plot')
+abline(a = 0, b = 1, col = 'red')
+# Normal probability plot of residuals
+qqnorm(model$residuals)
+qqline(model$residuals, col = "red")
+# Durbin Watson test
+durbinWatsonTest(model) 
+# Colinearity
+vif(model) # no colinearity detected
+
+# normal probability plot is virtually a straight line except for tip and tail
+# where outliers could be the issue. DW statistic is 2.01, which is as close to 
+# no autocorrelation as possible. VIF shows no colinearity.
+
+#############################################################################
+## MODEL - Test Validation
+#############################################################################
+# Read in the test data
+test = read.csv("test.csv"); test
+test$GrLivArea_log = log(test$GrLivArea) # right-skewed
+test$X1stFlrSF_log = log(test$X1stFlrSF) # right-skewed
+# clean up data where there was a log transformation on a column with a value of 0 within it
+# GrLivArea_log
+test$GrLivArea_log[which(is.nan(test$GrLivArea_log))] = NA
+test$GrLivArea_log[which(test$GrLivArea_log == Inf)] = NA
+test$GrLivArea_log[which(test$GrLivArea_log == -Inf)] = NA
+# verify the errors were removed
+psych::describe(test$GrLivArea_log)
+# Replace NA values in data with 0
+cols.rep = c("BsmtFullBath", "BsmtUnfSF", "TotalBsmtSF", "GarageCars")
+test[cols.rep][is.na(test[cols.rep])] = 0
+
+model = lm(log(SalePrice) ~ OverallQual+GarageCars+
+             TotalBsmtSF+X1stFlrSF_log+YearBuilt+YearRemodAdd+
+             Fireplaces+WoodDeckSF+X2ndFlrSF+LotArea+BsmtFullBath+
+             BsmtUnfSF+KitchenAbvGr+ScreenPorch+MSSubClass+PoolArea, 
+           data = train)
+prediction = exp(predict(model, test)); prediction
+#prediction = predict(model, test)
+#prediction[1115:1120]
+#test[1115:1120, ]
+output = cbind(test, SalePrice = prediction); output
+submission = output[, c("Id","SalePrice")]
+write.csv(submission, 
+          "C:/Users/mbray/Dropbox/Grad School/CU Denver/BANA_6610/project/submission3.csv", 
+          row.names = FALSE)
