@@ -27,7 +27,9 @@ dim(train) #1460 rows and 81 cols
 colnames(train)
 str(train)
 # Summary of normality by variable
-psych::describe(train)
+train.sum = as.data.frame(describe(train))
+test
+psych::describe(train$SalePrice)
 # missing a lot of data from:
 # Alley (91 records present)
 # FireplaceQu (770 records present)
@@ -46,14 +48,13 @@ qplot(train$SalePrice,
       geom="histogram",
       #breaks=seq(34000, 755000, by = n),
       bins = 15,
-      main = "Histogram for Sale Price", 
-      xlab = "Sale Price",
-      ylab = 'Count',
+      main = "Histogram for SalePrice", 
+      xlab = "SalePrice",
+      ylab = "Count",
       fill=I("black"), 
       col=I("gray")) +
-  scale_x_continuous(labels = dollar) +
-  theme(panel.background = element_rect(fill = '#ffffff'),
-        plot.title=element_text(size=16, hjust = 0.3),
+  scale_x_continuous(labels = dollar, breaks=seq(0, 800000, 100000)) +
+  theme(plot.title=element_text(size=16, hjust = 0.5),
         axis.title.y=element_text(size = 12, vjust = 0.2,
                                   margin = margin(t = 0, r = 20, b = 1, l = 0)),
         axis.title.x=element_text(size = 12, vjust = 0.2,
